@@ -3,6 +3,28 @@ import { IconSearch, ImageGenerate, ImageSearch, PreviousGeneratedImagesResponse
 import { ApiResponseHandler } from "./api-error-handler";
 
 export class PresentationGenerationApi {
+  static async importPptx(file: File) {
+    const formData = new FormData();
+    formData.append("pptx_file", file);
+
+    try {
+      const response = await fetch(
+        `/api/v1/ppt/presentation/import`,
+        {
+          method: "POST",
+          headers: getHeaderForFormData(),
+          body: formData,
+          cache: "no-cache",
+        }
+      );
+
+      return await ApiResponseHandler.handleResponse(response, "Failed to import PPTX");
+    } catch (error) {
+      console.error("PPTX import error:", error);
+      throw error;
+    }
+  }
+
   static async uploadDoc(documents: File[]) {
     const formData = new FormData();
 
@@ -104,8 +126,9 @@ export class PresentationGenerationApi {
 
   static async editSlide(
     slide_id: string,
-    prompt: string,
-    replaceContentOnly: boolean = false
+    prompt?: string,
+    content_updates?: Record<string, any>,
+    speaker_note?: string
   ) {
     try {
       const response = await fetch(
@@ -116,7 +139,8 @@ export class PresentationGenerationApi {
           body: JSON.stringify({
             id: slide_id,
             prompt,
-            replace_content_only: replaceContentOnly,
+            content_updates,
+            speaker_note,
           }),
           cache: "no-cache",
         }

@@ -1,4 +1,5 @@
 from typing import Annotated, Optional
+from copy import deepcopy
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
@@ -12,10 +13,6 @@ from utils.llm_calls.edit_slide import get_edited_slide_content
 from utils.llm_calls.edit_slide_html import get_edited_slide_html
 from utils.llm_calls.select_slide_type_on_edit import get_slide_layout_from_prompt
 from utils.process_slides import process_old_and_new_slides_and_fetch_assets
-from utils.template_lock import (
-    build_default_template_lock_constraints,
-    enforce_template_lock_content,
-)
 
 
 SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
@@ -24,8 +21,9 @@ SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
 @SLIDE_ROUTER.post("/edit")
 async def edit_slide(
     id: Annotated[uuid.UUID, Body()],
-    prompt: Annotated[str, Body()],
-    replace_content_only: Annotated[bool, Body()] = False,
+    prompt: Annotated[Optional[str], Body()] = None,
+    content_updates: Annotated[Optional[dict], Body()] = None,
+    speaker_note: Annotated[Optional[str], Body()] = None,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     slide = await sql_session.get(SlideModel, id)
@@ -35,48 +33,62 @@ async def edit_slide(
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
 
-    slide_properties = slide.properties or {}
-    template_constraints = slide_properties.get("template_constraints")
-    is_template_lock_enabled = replace_content_only or bool(template_constraints)
+    prompt = (prompt or "").strip()
 
-    presentation_layout = presentation.get_layout()
-    slide_layout = (
-        next((layout for layout in presentation_layout.slides if layout.id == slide.layout), None)
-        if is_template_lock_enabled
-        else await get_slide_layout_from_prompt(prompt, presentation_layout, slide)
-    )
-    if not slide_layout:
-        raise HTTPException(status_code=404, detail="Current slide layout not found")
+    if not prompt and not content_updates and speaker_note is None:
+        raise HTTPException(status_code=400, detail="No edit operation provided")
 
-    edited_slide_content = await get_edited_slide_content(
-        prompt, slide, presentation.language, slide_layout
-    )
+    def _apply_shape_level_updates(content: dict, updates: dict):
+        merged_content = deepcopy(content)
+        for shape_key in sorted(updates.keys()):
+            next_value = updates[shape_key]
+            previous_value = merged_content.get(shape_key)
+            if isinstance(previous_value, dict) and isinstance(next_value, dict):
+                merged_content[shape_key] = {**previous_value, **next_value}
+            else:
+                merged_content[shape_key] = next_value
+        return merged_content
 
-    if is_template_lock_enabled:
-        if not template_constraints:
-            template_constraints = build_default_template_lock_constraints(slide.content)
-        edited_slide_content = enforce_template_lock_content(
-            slide.content, edited_slide_content, template_constraints
+    edited_slide_content = slide.content
+    slide_layout = slide.layout
+    new_assets = []
+
+    if prompt:
+        presentation_layout = presentation.get_layout()
+        resolved_slide_layout = await get_slide_layout_from_prompt(
+            prompt, presentation_layout, slide
         )
-        slide_properties["template_constraints"] = template_constraints
+        slide_layout = resolved_slide_layout.id
 
-    image_generation_service = ImageGenerationService(get_images_directory())
+        edited_slide_content = await get_edited_slide_content(
+            prompt, slide, presentation.language, resolved_slide_layout
+        )
 
-    # This will mutate edited_slide_content
-    new_assets = await process_old_and_new_slides_and_fetch_assets(
-        image_generation_service,
-        slide.content,
-        edited_slide_content,
-    )
+        image_generation_service = ImageGenerationService(get_images_directory())
+
+        # This will mutate edited_slide_content
+        new_assets = await process_old_and_new_slides_and_fetch_assets(
+            image_generation_service,
+            slide.content,
+            edited_slide_content,
+        )
+
+    if content_updates:
+        edited_slide_content = _apply_shape_level_updates(
+            edited_slide_content, content_updates
+        )
 
     # Always assign a new unique id to the slide
     slide.id = uuid.uuid4()
 
     sql_session.add(slide)
     slide.content = edited_slide_content
-    slide.layout = slide.layout if is_template_lock_enabled else slide_layout.id
-    slide.properties = slide_properties
-    slide.speaker_note = edited_slide_content.get("__speaker_note__", "")
+    slide.layout = slide_layout
+    if speaker_note is not None:
+        slide.speaker_note = speaker_note
+        slide.content["__speaker_note__"] = speaker_note
+    else:
+        slide.speaker_note = edited_slide_content.get("__speaker_note__", "")
     sql_session.add_all(new_assets)
     await sql_session.commit()
 

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Loader2, PlusIcon, Trash2, Pencil, Trash } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Loader2, PlusIcon, Pencil, Trash, Shapes } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -35,8 +35,10 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
   const [showNewSlideSelection, setShowNewSlideSelection] = useState(false);
   const [isEditPopoverOpen, setIsEditPopoverOpen] = useState(false);
   const [isSpeakerPopoverOpen, setIsSpeakerPopoverOpen] = useState(false);
+  const [isImportedPopoverOpen, setIsImportedPopoverOpen] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
-  const [replaceContentOnly, setReplaceContentOnly] = useState(false);
+  const [speakerNoteDraft, setSpeakerNoteDraft] = useState(slide?.speaker_note || "");
+  const [shapeEdits, setShapeEdits] = useState<Record<string, string>>({});
   const { presentationData, isStreaming } = useSelector(
     (state: RootState) => state.presentationGeneration
   );
@@ -44,6 +46,35 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
   // Use the centralized group layouts hook
 
   const pathname = usePathname();
+  const importedBlocks = useMemo(() => {
+    if (!slide?.content || typeof slide.content !== "object") {
+      return [] as Array<{ key: string; value: string; updateTemplate?: Record<string, any> }>;
+    }
+
+    const blocks = Object.entries(slide.content)
+      .filter(([key]) => !key.startsWith("__"))
+      .map(([key, value]) => {
+        if (typeof value === "string" || typeof value === "number") {
+          return { key, value: String(value ?? "") };
+        }
+        if (value && typeof value === "object") {
+          const textField = ["text", "content", "value"].find(
+            (field) => typeof (value as any)[field] === "string"
+          );
+          if (textField) {
+            return {
+              key,
+              value: String((value as any)[textField] ?? ""),
+              updateTemplate: { [textField]: "" },
+            };
+          }
+        }
+        return null;
+      })
+      .filter(Boolean) as Array<{ key: string; value: string; updateTemplate?: Record<string, any> }>;
+
+    return blocks.sort((a, b) => a.key.localeCompare(b.key));
+  }, [slide?.content]);
 
   const handleSubmit = async () => {
     if (!editPrompt.trim()) {
@@ -70,6 +101,74 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
       console.error("Error in slide editing:", error);
       toast.error("Error in slide editing.", {
         description: error.message || "Error in slide editing.",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleSaveImportedBlocks = async () => {
+    const deterministicUpdates = Object.keys(shapeEdits)
+      .sort()
+      .reduce<Record<string, any>>((acc, key) => {
+        const matchingBlock = importedBlocks.find((block) => block.key === key);
+        if (matchingBlock?.updateTemplate) {
+          const templateKey = Object.keys(matchingBlock.updateTemplate)[0];
+          acc[key] = {
+            ...matchingBlock.updateTemplate,
+            [templateKey]: shapeEdits[key],
+          };
+          return acc;
+        }
+        acc[key] = shapeEdits[key];
+        return acc;
+      }, {});
+
+    if (!Object.keys(deterministicUpdates).length) {
+      toast.error("No imported block edits to save");
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const response = await PresentationGenerationApi.editSlide(
+        slide.id,
+        undefined,
+        deterministicUpdates
+      );
+      if (response) {
+        dispatch(updateSlide({ index: slide.index, slide: response }));
+        setShapeEdits({});
+        setIsImportedPopoverOpen(false);
+        toast.success("Imported blocks updated");
+      }
+    } catch (error: any) {
+      toast.error("Error updating imported blocks.", {
+        description: error.message || "Error updating imported blocks.",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleSaveSpeakerNote = async () => {
+    setIsUpdating(true);
+    try {
+      const response = await PresentationGenerationApi.editSlide(
+        slide.id,
+        undefined,
+        undefined,
+        speakerNoteDraft
+      );
+
+      if (response) {
+        dispatch(updateSlide({ index: slide.index, slide: response }));
+        setIsSpeakerPopoverOpen(false);
+        toast.success("Speaker note updated");
+      }
+    } catch (error: any) {
+      toast.error("Error updating speaker note.", {
+        description: error.message || "Error updating speaker note.",
       });
     } finally {
       setIsUpdating(false);
@@ -133,6 +232,10 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
       }
     }
   }, [slide, isStreaming]);
+
+  useEffect(() => {
+    setSpeakerNoteDraft(slide?.speaker_note || "");
+  }, [slide?.speaker_note, slide?.id]);
 
   return (
     <>
@@ -247,6 +350,62 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
                 </PopoverContent>
               </Popover>
 
+              {importedBlocks.length > 0 && (
+                <Popover open={isImportedPopoverOpen} onOpenChange={setIsImportedPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex px-3.5 py-2.5 items-center justify-center rounded-full bg-[#F7F6F9] font-syne"
+                    >
+                      <ToolTip content="Edit imported blocks">
+                        <Shapes className="h-4 w-4" />
+                      </ToolTip>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="bottom"
+                    align="center"
+                    sideOffset={12}
+                    className="z-30 w-[380px] rounded-2xl border border-gray-200 bg-white p-0 shadow-2xl font-syne"
+                  >
+                    <div className="border-b border-gray-100 px-4 py-3">
+                      <p className="text-sm font-semibold text-gray-900">Imported content blocks</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Edit individual imported shape blocks without regenerating the full slide.
+                      </p>
+                    </div>
+                    <div className="max-h-[360px] space-y-3 overflow-auto p-4">
+                      {importedBlocks.map((block) => (
+                        <div key={block.key} className="space-y-1">
+                          <p className="text-xs font-medium text-gray-600">{block.key}</p>
+                          <Textarea
+                            value={shapeEdits[block.key] ?? block.value}
+                            disabled={isUpdating}
+                            className="min-h-[72px] rounded-xl border border-gray-200 p-2 text-sm"
+                            onChange={(e) =>
+                              setShapeEdits((prev) => ({
+                                ...prev,
+                                [block.key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-end border-t border-gray-100 p-3">
+                      <button
+                        type="button"
+                        disabled={isUpdating}
+                        onClick={handleSaveImportedBlocks}
+                        className={`rounded-full bg-gradient-to-r from-[#9034EA] to-[#5146E5] px-4 py-2 text-sm font-medium text-white ${isUpdating ? "cursor-not-allowed opacity-70" : "hover:opacity-90"}`}
+                      >
+                        Save blocks
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+
               <Popover open={isSpeakerPopoverOpen} onOpenChange={setIsSpeakerPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button
@@ -280,8 +439,22 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
 
                   </div>
                   <div className="space-y-3 p-4">
-                    <div className="max-h-[220px] min-h-[100px] overflow-auto whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
-                      {slide?.speaker_note?.trim() || "No speaker notes for this slide."}
+                    <Textarea
+                      value={speakerNoteDraft}
+                      placeholder="Add speaker notes..."
+                      disabled={isUpdating}
+                      className="min-h-[120px] w-full resize-none rounded-xl border border-gray-200 p-3 text-sm"
+                      onChange={(e) => setSpeakerNoteDraft(e.target.value)}
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={isUpdating}
+                        onClick={handleSaveSpeakerNote}
+                        className={`rounded-full bg-gradient-to-r from-[#9034EA] to-[#5146E5] px-4 py-2 text-sm font-medium text-white ${isUpdating ? "cursor-not-allowed opacity-70" : "hover:opacity-90"}`}
+                      >
+                        Save note
+                      </button>
                     </div>
                   </div>
                 </PopoverContent>

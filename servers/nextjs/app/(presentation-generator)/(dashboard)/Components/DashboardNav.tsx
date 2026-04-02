@@ -2,15 +2,62 @@
 
 import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
-import React, { } from 'react'
+import React, { useRef } from 'react'
 import { defaultNavItems } from './DashboardSidebar';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { PresentationGenerationApi } from '../../services/api/presentation-generation';
+import { toast } from 'sonner';
+import { DashboardApi } from '../../services/api/dashboard';
+import { useDispatch } from 'react-redux';
+import { clearHistory } from '@/store/slices/undoRedoSlice';
+import { clearOutlines, setPresentationData, setPresentationId } from '@/store/slices/presentationGeneration';
 
 const DashboardNav = () => {
+    const dispatch = useDispatch();
+    const router = useRouter();
     const pathname = usePathname();
+    const importPptxInputRef = useRef<HTMLInputElement>(null);
     const activeTab = pathname.split("?")[0].split("/").pop();
     const activeItem = defaultNavItems.find((i: any) => i.key === activeTab);
 
+    const extractPresentationId = (response: any): string | null => {
+        return response?.id ?? response?.presentation_id ?? response?.presentationId ?? null;
+    };
+
+    const hydrateAndNavigateToPresentation = async (presentationId: string) => {
+        const presentation = await DashboardApi.getPresentation(presentationId);
+        dispatch(setPresentationId(presentationId));
+        dispatch(setPresentationData(presentation));
+        dispatch(clearHistory());
+        dispatch(clearOutlines());
+        router.push(`/presentation?id=${presentationId}`);
+    };
+
+    const handleImportPptx = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = event.target.files?.[0];
+        event.target.value = "";
+        if (!selectedFile) return;
+
+        if (!selectedFile.name.toLowerCase().endsWith(".pptx")) {
+            toast.error("Please select a valid PPTX file");
+            return;
+        }
+
+        try {
+            toast.info("Importing PPTX...");
+            const importResponse = await PresentationGenerationApi.importPptx(selectedFile);
+            const presentationId = extractPresentationId(importResponse);
+            if (!presentationId) {
+                throw new Error("Import succeeded but no presentation id was returned.");
+            }
+            await hydrateAndNavigateToPresentation(presentationId);
+        } catch (error: any) {
+            console.error("Error importing PPTX", error);
+            toast.error("PPTX import failed", {
+                description: error?.message || "Unable to import PPTX file.",
+            });
+        }
+    };
 
 
 
@@ -23,6 +70,22 @@ const DashboardNav = () => {
                     {activeItem?.label ?? (activeTab && activeTab?.charAt(0).toUpperCase() + activeTab?.slice(1))}
                 </h3>
                 <div className="flex  gap-2.5 max-sm:w-full max-md:justify-center max-sm:flex-wrap">
+                    {activeTab !== "playground" && activeTab !== "theme" && <>
+                        <input
+                            ref={importPptxInputRef}
+                            type="file"
+                            className="hidden"
+                            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                            onChange={handleImportPptx}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => importPptxInputRef.current?.click()}
+                            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[#5141e5] border border-[#5141e5]/30 text-sm font-medium hover:bg-[#5141e5]/5"
+                        >
+                            Import PPTX
+                        </button>
+                    </>}
 
 
 
