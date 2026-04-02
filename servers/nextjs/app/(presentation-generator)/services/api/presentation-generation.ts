@@ -104,7 +104,9 @@ export class PresentationGenerationApi {
 
   static async editSlide(
     slide_id: string,
-    prompt: string
+    prompt?: string,
+    content_updates?: Record<string, any>,
+    speaker_note?: string
   ) {
     try {
       const response = await fetch(
@@ -115,6 +117,8 @@ export class PresentationGenerationApi {
           body: JSON.stringify({
             id: slide_id,
             prompt,
+            content_updates,
+            speaker_note,
           }),
           cache: "no-cache",
         }
