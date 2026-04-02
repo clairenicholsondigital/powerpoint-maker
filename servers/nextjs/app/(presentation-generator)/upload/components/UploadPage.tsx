@@ -10,10 +10,10 @@
  */
 
 "use client";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useDispatch } from "react-redux";
-import { clearOutlines, setPresentationId } from "@/store/slices/presentationGeneration";
+import { clearOutlines, setPresentationData, setPresentationId } from "@/store/slices/presentationGeneration";
 import { PromptInput } from "./PromptInput";
 import { LanguageType, PresentationConfig, ToneType, VerbosityType } from "../type";
 import SupportingDoc from "./SupportingDoc";
@@ -26,6 +26,8 @@ import Wrapper from "@/components/Wrapper";
 import { setPptGenUploadState } from "@/store/slices/presentationGenUpload";
 import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 import { ConfigurationSelects } from "./ConfigurationSelects";
+import { DashboardApi } from "../../services/api/dashboard";
+import { clearHistory } from "@/store/slices/undoRedoSlice";
 
 // Types for loading state
 interface LoadingState {
@@ -40,6 +42,7 @@ const UploadPage = () => {
   const router = useRouter();
   const pathname = usePathname();
   const dispatch = useDispatch();
+  const importPptxInputRef = useRef<HTMLInputElement>(null);
 
   // State management
   const [files, setFiles] = useState<File[]>([]);
@@ -193,6 +196,68 @@ const UploadPage = () => {
     });
   };
 
+  const extractPresentationId = (response: any): string | null => {
+    return response?.id ?? response?.presentation_id ?? response?.presentationId ?? null;
+  };
+
+  const handleImportPptxClick = () => {
+    if (loadingState.isLoading) return;
+    importPptxInputRef.current?.click();
+  };
+
+  const hydrateAndNavigateToPresentation = async (presentationId: string) => {
+    const presentation = await DashboardApi.getPresentation(presentationId);
+    dispatch(setPresentationId(presentationId));
+    dispatch(setPresentationData(presentation));
+    dispatch(clearHistory());
+    dispatch(clearOutlines());
+    trackEvent(MixpanelEvent.Navigation, { from: pathname, to: `/presentation?id=${presentationId}` });
+    router.push(`/presentation?id=${presentationId}`);
+  };
+
+  const handleImportPptx = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!selectedFile) return;
+
+    if (!selectedFile.name.toLowerCase().endsWith(".pptx")) {
+      toast.error("Please select a valid PPTX file");
+      return;
+    }
+
+    setLoadingState({
+      isLoading: true,
+      message: "Importing PPTX...",
+      showProgress: true,
+      duration: 30,
+      extra_info: "This can take a moment for larger presentations.",
+    });
+
+    try {
+      const importResponse = await PresentationGenerationApi.importPptx(selectedFile);
+      const presentationId = extractPresentationId(importResponse);
+
+      if (!presentationId) {
+        throw new Error("Import succeeded but no presentation id was returned.");
+      }
+
+      toast.success("PPTX imported successfully");
+      await hydrateAndNavigateToPresentation(presentationId);
+    } catch (error: any) {
+      console.error("Error importing PPTX", error);
+      toast.error("PPTX import failed", {
+        description: error?.message || "Unable to import PPTX file.",
+      });
+      setLoadingState({
+        isLoading: false,
+        message: "",
+        duration: 0,
+        showProgress: false,
+      });
+    }
+  };
+
   return (
     <Wrapper className="pb-10 lg:max-w-[70%] xl:max-w-[65%]">
       <OverlayLoader
@@ -235,6 +300,25 @@ const UploadPage = () => {
             onFilesChange={setFiles}
             data-testid="file-upload-input"
           />
+        </div>
+        <div className="border-t border-slate-200/70" />
+
+        <div className="p-4 md:p-6">
+          <input
+            ref={importPptxInputRef}
+            type="file"
+            className="hidden"
+            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            onChange={handleImportPptx}
+          />
+          <Button
+            variant="outline"
+            onClick={handleImportPptxClick}
+            disabled={loadingState.isLoading}
+            className="w-full rounded-[28px] flex items-center justify-center py-5 border border-[#5141e5]/30 text-[#5141e5] font-syne font-semibold text-lg hover:bg-[#5141e5]/5"
+          >
+            <span>Import Existing PPTX</span>
+          </Button>
         </div>
         <div className="border-t border-slate-200/70" />
 
