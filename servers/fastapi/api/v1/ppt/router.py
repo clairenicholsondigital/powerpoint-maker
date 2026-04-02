@@ -25,6 +25,7 @@ API_V1_PPT_ROUTER = APIRouter(prefix="/api/v1/ppt")
 API_V1_PPT_ROUTER.include_router(FILES_ROUTER)
 API_V1_PPT_ROUTER.include_router(FONTS_ROUTER)
 API_V1_PPT_ROUTER.include_router(OUTLINES_ROUTER)
+# Includes /presentation/import-pptx along with other presentation endpoints.
 API_V1_PPT_ROUTER.include_router(PRESENTATION_ROUTER)
 API_V1_PPT_ROUTER.include_router(PPTX_SLIDES_ROUTER)
 API_V1_PPT_ROUTER.include_router(SLIDE_ROUTER)
