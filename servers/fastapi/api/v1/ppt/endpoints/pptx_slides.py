@@ -26,6 +26,7 @@ class SlideData(BaseModel):
     screenshot_url: str
     xml_content: str
     normalized_fonts: List[str]
+    constraint_metadata: Optional[Dict] = None
 
 
 class FontAnalysisResult(BaseModel):
@@ -215,6 +216,47 @@ def extract_fonts_from_oxml(xml_content: str) -> List[str]:
         return []
 
 
+def extract_placeholder_constraints_from_oxml(xml_content: str) -> Dict:
+    placeholders = []
+    namespaces = {
+        "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+        "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
+    }
+
+    try:
+        root = ET.fromstring(xml_content)
+        for shape in root.findall(".//p:sp", namespaces):
+            placeholder = shape.find(".//p:ph", namespaces)
+            if placeholder is None:
+                continue
+
+            placeholder_type = placeholder.attrib.get("type", "body")
+            placeholder_index = placeholder.attrib.get("idx")
+
+            role = "body"
+            if placeholder_type in {"title", "ctrTitle", "subTitle"}:
+                role = "title"
+            elif placeholder_type in {"pic", "obj"}:
+                role = "image"
+
+            placeholders.append(
+                {
+                    "placeholder_index": placeholder_index,
+                    "placeholder_type": placeholder_type,
+                    "role": role,
+                    "editable": role in {"title", "body", "image"},
+                }
+            )
+    except Exception:
+        placeholders = []
+
+    return {
+        "mode": "replace_content_only",
+        "editable_zones": placeholders,
+        "locked_zones": ["structure", "styling"],
+    }
+
+
 async def check_google_font_availability(font_name: str) -> bool:
     """
     Check if a font is available in Google Fonts.
@@ -392,6 +434,9 @@ async def process_pptx_slides(
                         screenshot_url=screenshot_url,
                         xml_content=xml_content,
                         normalized_fonts=normalized_fonts,
+                        constraint_metadata=extract_placeholder_constraints_from_oxml(
+                            xml_content
+                        ),
                     )
                 )
 

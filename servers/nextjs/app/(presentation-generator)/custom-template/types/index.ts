@@ -5,6 +5,11 @@ export interface SlideData {
   screenshot_url: string;
   xml_content?: string;
   normalized_fonts?: string[];
+  constraint_metadata?: {
+    mode: "replace_content_only";
+    editable_zones: Array<Record<string, any>>;
+    locked_zones: string[];
+  };
 }
 
 export interface UploadedFont {

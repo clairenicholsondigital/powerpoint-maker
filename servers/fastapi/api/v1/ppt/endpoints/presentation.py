@@ -475,10 +475,31 @@ async def update_presentation(
         presentation.sqlmodel_update(presentation_update_dict)
 
     if slides:
+        existing_slides = await sql_session.scalars(
+            select(SlideModel).where(SlideModel.presentation == presentation.id)
+        )
+        existing_by_index = {slide.index: slide for slide in existing_slides}
+
         # Just to make sure id is UUID
         for slide in slides:
             slide.presentation = uuid.UUID(slide.presentation)
             slide.id = uuid.UUID(slide.id)
+            existing_slide = existing_by_index.get(slide.index)
+            if not existing_slide:
+                continue
+
+            template_constraints = (existing_slide.properties or {}).get(
+                "template_constraints"
+            )
+            if template_constraints:
+                slide.content = enforce_template_lock_content(
+                    existing_slide.content, slide.content, template_constraints
+                )
+                slide.layout = existing_slide.layout
+                slide.layout_group = existing_slide.layout_group
+                merged_properties = existing_slide.properties or {}
+                merged_properties["template_constraints"] = template_constraints
+                slide.properties = merged_properties
 
         await sql_session.execute(
             delete(SlideModel).where(SlideModel.presentation == presentation.id)
@@ -990,6 +1011,13 @@ async def edit_presentation_with_new_content(
         )
         if new_slide_data:
             updated_content = deep_update(each_slide.content, new_slide_data[0].content)
+            template_constraints = (each_slide.properties or {}).get(
+                "template_constraints"
+            )
+            if template_constraints:
+                updated_content = enforce_template_lock_content(
+                    each_slide.content, updated_content, template_constraints
+                )
             new_slides.append(
                 each_slide.get_new_slide(presentation.id, updated_content)
             )
@@ -1042,6 +1070,13 @@ async def derive_presentation_from_existing_one(
         )
         if new_slide_data:
             updated_content = deep_update(each_slide.content, new_slide_data[0].content)
+            template_constraints = (each_slide.properties or {}).get(
+                "template_constraints"
+            )
+            if template_constraints:
+                updated_content = enforce_template_lock_content(
+                    each_slide.content, updated_content, template_constraints
+                )
         new_slides.append(
             each_slide.get_new_slide(new_presentation.id, updated_content)
         )
