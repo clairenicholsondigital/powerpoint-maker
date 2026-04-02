@@ -5,14 +5,16 @@ import math
 import os
 import random
 import traceback
+import tempfile
 from typing import Annotated, List, Literal, Optional, Tuple
 import dirtyjson
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Path, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from constants.presentation import DEFAULT_TEMPLATES
+from constants.documents import POWERPOINT_TYPES
 from enums.webhook_event import WebhookEvent
 from models.api_error_model import APIErrorModel
 from models.generate_presentation_request import GeneratePresentationRequest
@@ -47,6 +49,7 @@ from services.temp_file_service import TEMP_FILE_SERVICE
 from services.concurrent_service import CONCURRENT_SERVICE
 from models.sql.presentation import PresentationModel
 from services.pptx_presentation_creator import PptxPresentationCreator
+from services.pptx_import_service import PptxImportService
 from models.sql.async_presentation_generation_status import (
     AsyncPresentationGenerationTaskModel,
 )
@@ -124,6 +127,78 @@ async def delete_presentation(
 
     await sql_session.delete(presentation)
     await sql_session.commit()
+
+
+@PRESENTATION_ROUTER.post("/import-pptx", response_model=PresentationPathAndEditPath)
+async def import_pptx_as_presentation(
+    pptx_file: UploadFile = File(..., description="PPTX file to import"),
+    sql_session: AsyncSession = Depends(get_async_session),
+):
+    if not (pptx_file.filename or "").lower().endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="File must have .pptx extension")
+
+    if pptx_file.content_type not in POWERPOINT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Expected PPTX file, got {pptx_file.content_type}",
+        )
+
+    if (
+        hasattr(pptx_file, "size")
+        and pptx_file.size
+        and pptx_file.size > (100 * 1024 * 1024)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="PPTX file exceeded max upload size of 100 MB",
+        )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        pptx_path = os.path.join(temp_dir, "uploaded.pptx")
+        pptx_content = await pptx_file.read()
+        with open(pptx_path, "wb") as uploaded_file:
+            uploaded_file.write(pptx_content)
+
+        parsed_slides = PptxImportService.parse_pptx(pptx_path)
+
+    if not parsed_slides:
+        raise HTTPException(status_code=400, detail="Uploaded PPTX has no slides")
+
+    presentation_id = uuid.uuid4()
+    presentation_text = "\n\n".join(
+        filter(None, [slide.content.get("text") for slide in parsed_slides])
+    )
+
+    presentation = PresentationModel(
+        id=presentation_id,
+        title=os.path.splitext(pptx_file.filename or "Imported Presentation")[0],
+        content=presentation_text or "Imported PPTX presentation",
+        n_slides=len(parsed_slides),
+        language="en",
+    )
+
+    slides = [
+        SlideModel(
+            presentation=presentation_id,
+            layout_group=slide.layout_group,
+            layout=slide.layout,
+            index=index,
+            content=slide.content,
+            speaker_note=slide.speaker_note,
+            properties=slide.properties,
+        )
+        for index, slide in enumerate(parsed_slides)
+    ]
+
+    sql_session.add(presentation)
+    sql_session.add_all(slides)
+    await sql_session.commit()
+
+    return PresentationPathAndEditPath(
+        presentation_id=presentation_id,
+        path=f"/presentation?id={presentation_id}",
+        edit_path=f"/presentation?id={presentation_id}",
+    )
 
 
 @PRESENTATION_ROUTER.post("/create", response_model=PresentationModel)
