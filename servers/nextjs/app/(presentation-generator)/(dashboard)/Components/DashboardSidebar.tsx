@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { LayoutDashboard, Star, Brain, Settings, Palette } from "lucide-react";
+import { LayoutDashboard, Star, Brain, Settings, Palette, Layers } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -87,6 +87,21 @@ const DashboardSidebar = () => {
                             <div className="flex flex-col cursor-pointer tex-center items-center gap-2  transition-colors">
                                 <Palette className={`h-4 w-4 ${pathname === "/theme" ? "text-[#5146E5]" : "text-slate-600"}`} />
                                 <span className="text-[11px] text-slate-800">Themes</span>
+                            </div>
+                        </Link>
+                        <Link
+                            prefetch={false}
+                            href={`/master-governance`}
+                            className={[
+                                "flex flex-col tex-center items-center gap-2  transition-colors",
+                                pathname === "/master-governance" ? "" : "ring-transparent",
+                            ].join(" ")}
+                            aria-label="Master Governance"
+                            title="Master Governance"
+                        >
+                            <div className="flex flex-col cursor-pointer tex-center items-center gap-2  transition-colors">
+                                <Layers className={`h-4 w-4 ${pathname === "/master-governance" ? "text-[#5146E5]" : "text-slate-600"}`} />
+                                <span className="text-[11px] text-slate-800">Masters</span>
                             </div>
                         </Link>
                     </div>
