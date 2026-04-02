@@ -10,6 +10,7 @@ import { SendHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { PresentationGenerationApi } from "../../services/api/presentation-generation";
 import ToolTip from "@/components/ToolTip";
+import { Switch } from "@/components/ui/switch";
 import { RootState } from "@/store/store";
 import { useDispatch, useSelector } from "react-redux";
 import {
@@ -35,6 +36,7 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
   const [isEditPopoverOpen, setIsEditPopoverOpen] = useState(false);
   const [isSpeakerPopoverOpen, setIsSpeakerPopoverOpen] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
+  const [replaceContentOnly, setReplaceContentOnly] = useState(false);
   const { presentationData, isStreaming } = useSelector(
     (state: RootState) => state.presentationGeneration
   );
@@ -55,7 +57,8 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
       trackEvent(MixpanelEvent.Slide_Edit_API_Call);
       const response = await PresentationGenerationApi.editSlide(
         slide.id,
-        editPrompt
+        editPrompt,
+        replaceContentOnly
       );
 
       if (response) {
@@ -204,6 +207,16 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
                     <p className="mt-1 text-xs text-gray-500">
                       Describe how this slide should be improved.
                     </p>
+                    <div className="mt-3 flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium text-gray-800">Replace content only</p>
+                        <p className="text-[11px] text-gray-500">Protect brand styling and structure</p>
+                      </div>
+                      <Switch
+                        checked={replaceContentOnly}
+                        onCheckedChange={setReplaceContentOnly}
+                      />
+                    </div>
                   </div>
                   <form
                     className="flex flex-col gap-3 p-4"

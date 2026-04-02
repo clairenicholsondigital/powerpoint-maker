@@ -171,6 +171,7 @@ export const useSlideProcessing = (
           screenshot_url: slide.screenshot_url,
           xml_content: slide.xml_content ?? "",
           normalized_fonts: slide.normalized_fonts ?? [],
+          constraint_metadata: slide.constraint_metadata,
           processing: false,
           processed: false,
         })
