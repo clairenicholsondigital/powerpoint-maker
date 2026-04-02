@@ -42,6 +42,7 @@ from utils.dict_utils import deep_update
 from utils.export_utils import export_presentation
 from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
 from models.sql.slide import SlideModel
+from models.sql.slide_import_mapping import SlideImportMappingModel
 from models.sse_response import SSECompleteResponse, SSEErrorResponse, SSEResponse
 
 from services.database import get_async_session
@@ -68,6 +69,7 @@ from utils.process_slides import (
     process_slide_add_placeholder_assets,
     process_slide_and_fetch_assets,
 )
+from utils.slide_import_mapping_utils import build_slide_import_mappings
 import uuid
 
 
@@ -418,10 +420,17 @@ async def stream_presentation(
         await sql_session.execute(
             delete(SlideModel).where(SlideModel.presentation == id)
         )
+        await sql_session.execute(
+            delete(SlideImportMappingModel).where(
+                SlideImportMappingModel.presentation_id == id
+            )
+        )
         await sql_session.commit()
 
+        import_mappings = build_slide_import_mappings(slides)
         sql_session.add(presentation)
         sql_session.add_all(slides)
+        sql_session.add_all(import_mappings)
         sql_session.add_all(generated_assets)
         await sql_session.commit()
 
@@ -474,7 +483,14 @@ async def update_presentation(
         await sql_session.execute(
             delete(SlideModel).where(SlideModel.presentation == presentation.id)
         )
+        await sql_session.execute(
+            delete(SlideImportMappingModel).where(
+                SlideImportMappingModel.presentation_id == presentation.id
+            )
+        )
+        import_mappings = build_slide_import_mappings(slides)
         sql_session.add_all(slides)
+        sql_session.add_all(import_mappings)
 
     await sql_session.commit()
 
@@ -819,8 +835,10 @@ async def generate_presentation_handler(
             generated_assets.extend(assets_list)
 
         # 8. Save PresentationModel and Slides
+        import_mappings = build_slide_import_mappings(slides)
         sql_session.add(presentation)
         sql_session.add_all(slides)
+        sql_session.add_all(import_mappings)
         sql_session.add_all(generated_assets)
         await sql_session.commit()
 
@@ -980,8 +998,16 @@ async def edit_presentation_with_new_content(
     await sql_session.execute(
         delete(SlideModel).where(SlideModel.id.in_(slides_to_delete))
     )
+    await sql_session.execute(
+        delete(SlideImportMappingModel).where(
+            SlideImportMappingModel.slide_id.in_(slides_to_delete)
+        )
+    )
+
+    import_mappings = build_slide_import_mappings(new_slides)
 
     sql_session.add_all(new_slides)
+    sql_session.add_all(import_mappings)
     await sql_session.commit()
 
     presentation_and_path = await export_presentation(
@@ -1020,8 +1046,11 @@ async def derive_presentation_from_existing_one(
             each_slide.get_new_slide(new_presentation.id, updated_content)
         )
 
+    import_mappings = build_slide_import_mappings(new_slides)
+
     sql_session.add(new_presentation)
     sql_session.add_all(new_slides)
+    sql_session.add_all(import_mappings)
     await sql_session.commit()
 
     presentation_and_path = await export_presentation(

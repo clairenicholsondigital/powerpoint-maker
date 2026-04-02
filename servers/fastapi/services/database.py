@@ -17,6 +17,7 @@ from models.sql.key_value import KeyValueSqlModel
 from models.sql.ollama_pull_status import OllamaPullStatus
 from models.sql.presentation import PresentationModel
 from models.sql.slide import SlideModel
+from models.sql.slide_import_mapping import SlideImportMappingModel
 from models.sql.presentation_layout_code import PresentationLayoutCodeModel
 from models.sql.template import TemplateModel
 from models.sql.webhook_subscription import WebhookSubscription
@@ -58,6 +59,7 @@ async def create_db_and_tables():
                 tables=[
                     PresentationModel.__table__,
                     SlideModel.__table__,
+                    SlideImportMappingModel.__table__,
                     KeyValueSqlModel.__table__,
                     ImageAsset.__table__,
                     PresentationLayoutCodeModel.__table__,

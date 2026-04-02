@@ -23,6 +23,7 @@ from models.sql.presentation_layout_code import (  # noqa: F401, E402
     PresentationLayoutCodeModel,
 )
 from models.sql.slide import SlideModel  # noqa: F401, E402
+from models.sql.slide_import_mapping import SlideImportMappingModel  # noqa: F401, E402
 from models.sql.template import TemplateModel  # noqa: F401, E402
 from models.sql.webhook_subscription import WebhookSubscription  # noqa: F401, E402
 
